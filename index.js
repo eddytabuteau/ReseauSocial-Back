@@ -27,7 +27,7 @@ const maDB = 'reseauSocial';
 const maCollectionUsers= 'user'
 const maCollectionPhotoUsers= 'photoUser'
 const maCollectioncommentairesMessage= 'commentairesMessage'
-const maCollectionListeUsers= 'listeUser'
+const maCollectiondiscussion= 'discussion'
 const maCollectionChats= 'chat'
 const maCollectionDiscussions= 'historique'
 
@@ -236,6 +236,26 @@ function RecommandationReceveur(dataReceveurInvitation,pseudoDemandeurInvitation
       {pseudo: pseudoDemandeurInvitation},
       {$pull : {"listeUser.$[].listeAmisRecommandé" : {pseudoRecommandation:dataReceveurInvitation.pseudo,pseudoOrigineRecommandation:dataReceveurInvitation.pseudoOrigineRecommandation}}}
     )
+  });
+}
+
+//supprimer un commentaire/message profil
+
+function supprimerMessageProfilCommentaires(idMessage){
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectioncommentairesMessage);
+    
+    donnees.deleteMany( { idMessage: idMessage } )
+  });
+}
+
+function supprimerChatCommentaires(idChat){
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectionChats);
+    
+    donnees.deleteMany( { idChat: idChat } )
   });
 }
 /** 
@@ -571,6 +591,215 @@ socket.on('invitation user recommandation', (data) =>{
       })
       })
 
+    //10.Supprimer un message sur le profil
+    socket.on('supprimer message profil', (data) =>{    
+      MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+        const donnees = client.db(maDB).collection(maCollectionUsers);
+        
+        donnees.updateOne(
+          {pseudo: data.pseudo},
+          {$pull: { messageProfil: { idMessage: data.idMessage } }}
+        ).then(
+          supprimerMessageProfilCommentaires(data.idMessage),
+          socket.emit('reponse supprimer message profil', 'données update')
+        )
+      });
+      
+  })
+
+  //discussion
+  function creationDiscussion(data){
+    MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+      const donnees = client.db(maDB).collection(maCollectionUsers);
+      
+      donnees.updateOne(
+        {pseudo: data.receveur.pseudo},
+        {$push: { "discussion.$[].rejoindreDiscussion": {pseudoDemandeur:data.demandeur.pseudo,idDiscussion:data.idDiscussion} }}
+      )
+      .then(
+        donnees.updateOne(
+        {pseudo: data.demandeur.pseudo},
+        {$push: { "discussion.$[].discussionEncours": {pseudo:data.receveur.pseudo,idDiscussion:data.idDiscussion} }}
+      ))
+      .then(
+        maildiscussion(data.receveur.mail,data.demandeur.mail),
+        socket.emit('reponse creation discussion user', data.idDiscussion)
+      )
+    });
+  }
+  socket.on('creation discussion user', (data) =>{ 
+    const dataUser = data 
+    const IdDisc = passwordSecure.randomPassword({ length: 20})
+    dataUser.idDiscussion = IdDisc
+
+    if(!dataUser.confirme){
+      MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+        const donnees = client.db(maDB).collection(maCollectionUsers);
+        
+        donnees.updateOne(
+          {pseudo: dataUser.demandeur.pseudo},
+          {$push: { "discussion.$[].DiscussionConfirmées": {pseudo:dataUser.receveur.pseudo,idDiscussion:dataUser.idDiscussion} }}
+        ).then(
+          donnees.updateOne(
+            {pseudo: dataUser.receveur.pseudo},
+            {$push: { "discussion.$[].DiscussionConfirmées": {pseudo:dataUser.demandeur.pseudo,idDiscussion:dataUser.idDiscussion} }})
+        )
+        .then(
+          creationDiscussion(dataUser)
+        )
+      });
+    }
+    else{
+      creationDiscussion(dataUser)
+    }
+})
+
+socket.on('discussion user', (data) =>{
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+    const donnees = client.db(maDB).collection(maCollectiondiscussion);
+    donnees.find({ idDiscussion : data }).toArray((err,datas) => {
+      socket.emit('reponse discussion user', datas);
+      client.close()  
+    })
+})
+})
+
+socket.on('discussion', (data) =>{    
+  console.log('isertion message')
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectiondiscussion);
+    donnees.insertOne(data).then(
+      console.log('envoie message'),
+      io.emit('reponse discussion', data)
+    )
+    
+  });
+})
+
+socket.on('discussion terminée', (data) =>{   
+  console.log(data.idDiscussion) 
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+
+    const donnees = client.db(maDB).collection(maCollectionUsers);
+    donnees.updateOne(
+      {pseudo: data.pseudo},
+      {$pull: { "discussion.$[].discussionEncours": {idDiscussion: data.idDiscussion} }}
+    ).then(
+      donnees.updateOne(
+        {pseudo: data.pseudoDemandeur},
+        {$pull: { "discussion.$[].rejoindreDiscussion": {idDiscussion: data.idDiscussion} }}
+      )
+    ).then(
+      io.emit('connexion Discussion', {idDiscussion: data.idDiscussion,connexion: false})
+    )
+  });
+})
+
+ 
+socket.on('rejoindre Discussion creation', (data) =>{   
+  console.log(data) 
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectionUsers);
+    
+    donnees.updateOne(
+      {pseudo: data.pseudoReceveur},
+      {$pull: { "discussion.$[].rejoindreDiscussion": {idDiscussion: data.idDiscussion} }}
+    ).then(
+      donnees.updateOne(
+      {pseudo: data.pseudoReceveur},
+      {$push: { "discussion.$[].discussionEncours": {pseudo:data.pseudoOrigine,idDiscussion:data.idDiscussion} }}
+    )
+    ).then(
+      socket.emit('reponse rejoindre Discussion creation', data.idDiscussion),
+      io.emit('connexion Discussion', {idDiscussion: data.idDiscussion,connexion: true})
+    )
+  });
+  
+})
+
+
+
+
+
+//chat
+socket.on('chat creation', (data) =>{
+  const IdChat = passwordSecure.randomPassword({ length: 20})
+  const dataUsers = data.chat;
+  dataUsers.idChat = IdChat
+ 
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectionUsers);
+    
+    donnees.updateMany(
+      { pseudo : { $in : data.participants}},
+      {$push: { "userChat": dataUsers }}
+    ).then(
+      socket.emit('reponse chat creation', dataUsers.idChat),
+    )
+  });
+  
+})
+
+socket.on('chat recherche', (data) =>{
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+    const donnees = client.db(maDB).collection(maCollectionChats);
+    donnees.find({ idChat : data }).toArray((err,datas) => {
+      socket.emit('reponse chat recherche', datas);
+      client.close()  
+    })
+})
+})
+
+socket.on('chat', (data) =>{  
+  const idCommentaireChat = passwordSecure.randomPassword({ length: 20})
+  const dataUsers = data;
+  dataUsers.idCommentaireChat = idCommentaireChat  
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectionChats);
+    donnees.insertOne(dataUsers).then(
+      io.emit('reponse chat', dataUsers)
+    )
+    
+  });
+})
+
+socket.on('supprimer chat', (data) =>{    
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectionUsers);
+    
+    donnees.updateMany(
+      {pseudo: { $in : data.participants}},
+      {$pull: { userChat: { idChat: data.idChat } }}
+    ).then(
+      supprimerChatCommentaires(data.idChat),
+      socket.emit('reponse supprimer chat', 'données update')
+    )
+  });
+  
+})
+
+socket.on('supprimer chat commentaire', (data) =>{    
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectionChats);
+    
+    donnees.deleteOne( { idCommentaireChat: data.idCommentaireChat } )
+    .then(
+      socket.emit('reponse supprimer chat commentaire', 'données update')
+    )
+  });
+  
+})
+
 //Actualisation dataUser
 socket.on('updateDataUser', (data) =>{
   MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
@@ -806,6 +1035,38 @@ async function resetPasswordMail(mailuser,pseudoUser,newpassword) {
         text: 'That was easy!',
         html: `<b>Hello ${pseudoReceveurMessageProfil},</b><br>${pseudoUserMessage} a publié un message sur votre profil </br>
         <br>Veulliez vous connecter à votre compte pour répondre au message</br>`,
+      };
+  
+  
+      transporter.sendMail(mailData, (err, info) => { 
+        if(err) 
+          return console.log(err) 
+        else 
+          console.log('succes :',info); 
+     });
+  
+  }
+
+        //5.Envoie d'un mail pour la discussion instantannée
+ async function maildiscussion(mailDemandeurDiscussion,mailReceveurDiscussion) {
+
+  const transporter = nodemailer.createTransport({
+    port: 465,               // true for 465, false for other ports
+    host: "smtp.gmail.com",
+       auth: {
+            user: 'reseau.social.ifocop2021@gmail.com',
+            pass: 'ReseauSocial2021',
+         },
+    secure: true,
+    });
+  
+    const mailData = {
+      from: 'reseau.social.ifocop2021@gmail.com',  // sender address
+        to: [mailDemandeurDiscussion,mailReceveurDiscussion],   // list of receivers
+        subject: `Démarrer une discussion instannée sur votre profil Reseau Social`,
+        text: 'That was easy!',
+        html: `<b>Hello,</b>
+        <br>Veulliez vous connecter à votre compte pour rejoindre la discussion</br>`,
       };
   
   
