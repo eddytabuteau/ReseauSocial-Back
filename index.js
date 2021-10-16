@@ -145,7 +145,10 @@ function deconnectionSocket(pseudo){
 
 function deconnectionSocketID(socketId){
   MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
-
+    if (err) {
+      console.error('An error occurred connecting to MongoDB: ', err);
+      throw err;
+    }
     const donnees = client.db(maDB).collection(maCollectionUsers);
     
     donnees.updateOne(
@@ -303,19 +306,19 @@ function supprimerChatCommentaires(idChat){
  * *************************************
  */
 
-let nombreConnexion = 0;
+let nombreConnexion = 0;// nombre de connexion socket
 let nombreInscrits;
 io.on("connection", socket => {
   console.log(socket.id)
   nombreConnexion++
   console.log('a user connected')
-  io.emit('nombre connexion', nombreConnexion);
+  io.emit('nombre connexion', nombreConnexion);// data envoyée à toute les sockets
 
   if(nombreInscrits !== undefined){
     io.emit('nombre inscrits', nombreInscrits);
   }
 
-  socket.on('connexion', (data) =>{
+  function nombreinscEtCo(data){
     MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
 
       const donnees = client.db(maDB).collection(maCollectionUsers);
@@ -324,10 +327,14 @@ io.on("connection", socket => {
       donnees.find().toArray((err,datas) =>{
       nombreInscrits = datas
       client.close()
-      io.emit('nombre inscrits', nombreInscrits);
+      io.emit('nombre inscrits', datas);
     })
     })
     io.emit('nombre connexion', nombreConnexion);
+  }
+
+  socket.on('connexion', (data) =>{
+    nombreinscEtCo(data)
 
   })
 
@@ -456,25 +463,25 @@ socket.on('verif email user', (data) =>{
 // *****recherche User******
 // 1. afficher la liste des users qui ne sont pas des amis ou n'ont pas reçus d'invitations
 socket.on('recherche user', (data) =>{
-if(data){
-  const liste = data.listeUserDemandeur
-  const listeUser = liste.listeAmisConfirmées.concat(liste.listeAmisAttenteConf).concat(liste.listeAmisEnAttente);
-  listeUser.push(data.pseudoDemandeur)
+  if(data){
+    const liste = data.listeUserDemandeur
+    const listeUser = liste.listeAmisConfirmées.concat(liste.listeAmisAttenteConf).concat(liste.listeAmisEnAttente);
+    listeUser.push(data.pseudoDemandeur)
 
-  console.log(listeUser);
+    console.log(listeUser);
 
 
-  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+    MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
 
-    const donnees = client.db(maDB).collection(maCollectionUsers);
-    
+      const donnees = client.db(maDB).collection(maCollectionUsers);
+      
 
-    donnees.find({ pseudo : { $nin : listeUser}}).toArray((err,datas) =>{
-  client.close()
-  socket.emit('reponse recherche user', datas);
-  })
-  })
-}
+      donnees.find({ pseudo : { $nin : listeUser}}).toArray((err,datas) =>{
+        client.close()
+        socket.emit('reponse recherche user', datas);
+      })
+    })
+  }
 })
 
 //2.Ajout dans la BDD de l'invitation en cours et de l'invitation en attente de confirmation
@@ -503,26 +510,27 @@ socket.on('recherche user invitation', (data) =>{
     })
     })
   }
-  })
+})
 
   //4.traitement de la reponse de l'invitation
 socket.on('invitation reponse', (data) =>{
+  console.log(data)
 
   if(data.resInvitation === "Invitation acceptée"){
-    acceptationInvitationReceveur(data.dataUserDemandeur,data.dataUseReceveur)
-    acceptationInvitationDemandeur(data.dataUserDemandeur,data.dataUseReceveur)
+    acceptationInvitationReceveur({pseudo: data.dataUserDemandeur},data.dataUseReceveur)
+    acceptationInvitationDemandeur({pseudo: data.dataUserDemandeur},data.dataUseReceveur)
   }
   else{
-    ignoreInvitationReceveur(data.dataUserDemandeur,data.dataUseReceveur)
-    ignoreInvitationDemandeur(data.dataUserDemandeur,data.dataUseReceveur)
+    ignoreInvitationReceveur({pseudo: data.dataUserDemandeur},data.dataUseReceveur)
+    ignoreInvitationDemandeur({pseudo: data.dataUserDemandeur},data.dataUseReceveur)
   }
   
 })
 
   //5.Envoyer une recommandation
   socket.on('recommandation', (data) =>{
-    recommandation(data.userRecommandationReceveur.pseudo,data.userRecommandation.pseudo,data.userRecommandationDemandeur)
-    mailRecommandation(data.userRecommandation.pseudo,data.userRecommandationDemandeur,data.userRecommandationReceveur.pseudo,data.userRecommandationReceveur.email)
+    recommandation(data.userRecommandationReceveur.pseudo,data.userRecommandation,data.userRecommandationDemandeur)
+    mailRecommandation(data.userRecommandation,data.userRecommandationDemandeur,data.userRecommandationReceveur.pseudo,data.userRecommandationReceveur.email)
   })
 
   //6.Afficher la liste des recommandations
@@ -558,7 +566,8 @@ socket.on('invitation user recommandation', (data) =>{
   }
 })
 
-    //8.mettre à jour la liste des messages publics
+// *****Profil******
+    //1.mettre à jour la liste des messages publics
     socket.on('messages publics', (data) =>{
 
       const id = passwordSecure.randomPassword({ length: 20})
@@ -579,7 +588,7 @@ socket.on('invitation user recommandation', (data) =>{
       });
     })
 
-      //9.mettre à jour la liste des commentaires
+      //2.mettre à jour la liste des commentaires
       socket.on('commentaire', (data) =>{    
           MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
     
@@ -600,7 +609,7 @@ socket.on('invitation user recommandation', (data) =>{
       })
       })
 
-    //10.Supprimer un message sur le profil
+    //3.Supprimer un message sur le profil
     socket.on('supprimer message profil', (data) =>{    
       MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
 
@@ -616,8 +625,18 @@ socket.on('invitation user recommandation', (data) =>{
       });
       
   })
-
-  //11.Voir liste amis User
+    //4.Supprimer un commentaire
+  socket.on('supprimer commentaire profil', (data) =>{  
+    MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+      const donnees = client.db(maDB).collection(maCollectioncommentairesMessage);
+      donnees.deleteOne({ _id: new ObjectId(data) })
+      .then(
+        socket.emit('reponse supprimer commentaire profil', 'données update')
+      )   
+  })  
+  })
+// *****liste amis user******
+  //1.Voir liste amis User
   socket.on('liste amis user', (data) =>{
     MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
       const donnees = client.db(maDB).collection(maCollectionUsers);
@@ -628,7 +647,7 @@ socket.on('invitation user recommandation', (data) =>{
   })
   })
 
-  //12.supprimer un utilisateur de la liste d'amis
+  //2.supprimer un utilisateur de la liste d'amis
   socket.on('supprimer liste amis user', (data) =>{  
     MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
       const donnees = client.db(maDB).collection(maCollectionUsers);
@@ -646,17 +665,7 @@ socket.on('invitation user recommandation', (data) =>{
   })  
   })
 
-socket.on('supprimer commentaire profil', (data) =>{  
-  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
-    const donnees = client.db(maDB).collection(maCollectioncommentairesMessage);
-    donnees.deleteOne({ _id: new ObjectId(data) })
-    .then(
-      socket.emit('reponse supprimer commentaire profil', 'données update')
-    )   
-})  
-})
-
-  //discussion
+// *****discussion******
   function creationDiscussion(data){
     MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
 
@@ -777,8 +786,7 @@ socket.on('rejoindre Discussion creation', (data) =>{
 
 
 
-
-//chat
+// *****chat******
 socket.on('chat creation', (data) =>{
   const IdChat = passwordSecure.randomPassword({ length: 20})
   const dataUsers = data.chat;
@@ -853,7 +861,7 @@ socket.on('supprimer chat commentaire', (data) =>{
   
 })
 
-//Modification du profil
+// *****Modification du profil******
 socket.on('update profil', (data) =>{    
   MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
 
@@ -867,7 +875,21 @@ socket.on('update profil', (data) =>{
   
 })
 
-//ADMIN
+socket.on('update mdp', (data) =>{   
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectionUsers);
+    
+    donnees.updateOne(
+      {pseudo: data.pseudo},
+      { $set: { password: data.password} }
+    )
+  });
+  
+})
+
+
+// *****ADMIN*****
   //1. liste utilisateurs
 socket.on('liste users admin', (data) =>{
   MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
@@ -988,14 +1010,17 @@ socket.on('user supp', (data) =>{
     )
     .then(
       mailDeleteUser(data.mail,data.pseudo),
-      socket.emit('reponse user supp', 'user supprimé')
+      socket.emit('reponse user supp', data.pseudo),
+      io.emit('reponse user supp deco', data.pseudo),
+      
     )
       
 })
 })
 //3.Stats
 
-//Actualisation dataUser
+
+// *****Actualisation dataUser*****
 socket.on('updateDataUser', (data) =>{
   MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
     const donnees = client.db(maDB).collection(maCollectionUsers);
@@ -1006,7 +1031,7 @@ socket.on('updateDataUser', (data) =>{
 })
 })
 
-//en cas de déconnexion d'un joueur
+// *****en cas de déconnexion d'un joueur*****
 function suppDiscussionEncours(data){
   console.log('pseudo',data)
   MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
@@ -1155,7 +1180,7 @@ const transporter = nodemailer.createTransport({
       to: mailuser,   // list of receivers
       subject: `Confirmation de création du compte Reseau Social`,
       text: 'That was easy!',
-      html: `<b>Hello ${pseudoUser},</b><br>Par le pésent mail nous vous confirmons votre inscription au site Réseau Social !!!</br>`,
+      html: `<b>Hello ${pseudoUser},</b><br>Par le présent mail nous vous confirmons votre inscription au site Réseau Social !!!</br>`,
     };
 
 
@@ -1203,7 +1228,7 @@ async function resetPasswordMail(mailuser,pseudoUser,newpassword) {
   }
 
 
-  //3.Envoie d'un mail pour une invitation reçu
+//3.Envoie d'un mail pour une invitation reçu
  async function mailInvitation(mailuser,pseudoUserDemandeur,pseudoReceveur) {
 
   const transporter = nodemailer.createTransport({
@@ -1235,7 +1260,7 @@ async function resetPasswordMail(mailuser,pseudoUser,newpassword) {
   
   }
 
-    //4.Envoie d'un mail pour une recommandation reçu
+//4.Envoie d'un mail pour une recommandation reçu
  async function mailRecommandation(pseudoUserRecommandation,pseudoDemandeur,pseudoReceveur,mailReceveur) {
 
   const transporter = nodemailer.createTransport({
@@ -1267,7 +1292,7 @@ async function resetPasswordMail(mailuser,pseudoUser,newpassword) {
   
   }
 
-      //4.Envoie d'un mail pour une recommandation reçu
+//5.Envoie d'un mail pour un message sur le profil
  async function mailMessageProfil(pseudoUserMessage,mailReceveurMessageProfil,pseudoReceveurMessageProfil) {
 
   const transporter = nodemailer.createTransport({
@@ -1299,7 +1324,7 @@ async function resetPasswordMail(mailuser,pseudoUser,newpassword) {
   
   }
 
-        //5.Envoie d'un mail pour la discussion instantannée
+//6.Envoie d'un mail pour la discussion instantannée
  async function maildiscussion(mailDemandeurDiscussion,mailReceveurDiscussion) {
 
   const transporter = nodemailer.createTransport({
@@ -1332,7 +1357,7 @@ async function resetPasswordMail(mailuser,pseudoUser,newpassword) {
   }
 
 
-          //6.Envoie d'un mail pour la suppression 
+//7.Envoie d'un mail pour la suppression User
  async function mailDeleteUser(mail,pseudo) {
 
   const transporter = nodemailer.createTransport({
