@@ -130,34 +130,6 @@ function connexionSocket(socketId,pseudo){
   });
 }
 
-//mise à jour de la BDD quand un utilisateur se déco
-function deconnectionSocket(pseudo){
-  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
-
-    const donnees = client.db(maDB).collection(maCollectionUsers);
-    
-    donnees.updateOne(
-      {pseudo : pseudo},
-      {$set: { socketId:"",connexion: false} }
-    )
-  });
-}
-
-function deconnectionSocketID(socketId){
-  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
-    if (err) {
-      console.error('An error occurred connecting to MongoDB: ', err);
-      throw err;
-    }
-    const donnees = client.db(maDB).collection(maCollectionUsers);
-    
-    donnees.updateOne(
-      {socketId: socketId},
-      {$set: { socketId:"",connexion: false} }
-    )
-  });
-}
-
 //mettre à jour la liste du demandeur de l'invitation
 function envoiMongoDBDemendeurInvitation(pseudoDemendeur,pseudoReceveur){
   MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
@@ -306,19 +278,16 @@ function supprimerChatCommentaires(idChat){
  * *************************************
  */
 
-let nombreConnexion = 0;// nombre de connexion socket
 let nombreInscrits;
 io.on("connection", socket => {
   console.log(socket.id)
-  nombreConnexion++
   console.log('a user connected')
-  io.emit('nombre connexion', nombreConnexion);// data envoyée à toute les sockets
 
   if(nombreInscrits !== undefined){
     io.emit('nombre inscrits', nombreInscrits);
   }
 
-  function nombreinscEtCo(data){
+  function nombreinscEtCo(){
     MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
 
       const donnees = client.db(maDB).collection(maCollectionUsers);
@@ -330,11 +299,11 @@ io.on("connection", socket => {
       io.emit('nombre inscrits', datas);
     })
     })
-    io.emit('nombre connexion', nombreConnexion);
+    
   }
 
   socket.on('connexion', (data) =>{
-    nombreinscEtCo(data)
+    nombreinscEtCo()
 
   })
 
@@ -1068,17 +1037,51 @@ function suppDiscussionEncoursId(data){
     )
   });
 }
+
+//mise à jour de la BDD quand un utilisateur se déco
+function deconnectionSocket(pseudo){
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+
+    const donnees = client.db(maDB).collection(maCollectionUsers);
+    
+    donnees.updateOne(
+      {pseudo : pseudo},
+      {$set: { socketId:"",connexion: false} }
+    )
+    .then(
+      nombreinscEtCo()
+    )
+  });
+}
+
+function deconnectionSocketID(socketId){
+  MongoClient.connect(url, { useUnifiedTopology: true }, (err,client) => {
+    if (err) {
+      console.error('An error occurred connecting to MongoDB: ', err);
+      throw err;
+    }
+    const donnees = client.db(maDB).collection(maCollectionUsers);
+    
+    donnees.updateOne(
+      {socketId: socketId},
+      {$set: { socketId:"",connexion: false} }
+    )
+    .then(
+      nombreinscEtCo()
+    )
+  });
+}
 socket.on('deco user', (data) =>{
+  console.log('la')
   deconnectionSocket(data[0].pseudo)
   suppDiscussionEncours(data[0].pseudo)
+  
 })
 socket.on("disconnect", (reason) => {
-  nombreConnexion--
   console.log('a user disconnect')
   console.log(socket.id)
   deconnectionSocketID(socket.id)
   suppDiscussionEncoursId(socket.id)
-  io.emit('deconnexion',nombreConnexion)
 })
 });
 
